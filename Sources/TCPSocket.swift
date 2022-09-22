@@ -114,8 +114,8 @@ public final class TCPSocket {
         let size = socklen_t(MemoryLayout<sockaddr_in6>.size)
         // bind the address and port on socket
         guard withUnsafePointer(to: &address, { pointer in
-            return pointer.withMemoryRebound(to: sockaddr.self, capacity: Int(size)) { pointer in
-                return SystemLibrary.bind(fileDescriptor, pointer, size) >= 0
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
+                SystemLibrary.bind(fileDescriptor, pointer, size) >= 0
             }
         }) else {
             throw OSError.lastIOError()
@@ -135,7 +135,7 @@ public final class TCPSocket {
         var address = sockaddr_in6()
         var size = socklen_t(MemoryLayout<sockaddr_in6>.size)
         let clientFileDescriptor = withUnsafeMutablePointer(to: &address) { pointer in
-            return pointer.withMemoryRebound(to: sockaddr.self, capacity: Int(size)) { pointer in
+            return pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
                 return SystemLibrary.accept(fileDescriptor, pointer, &size)
             }
         }
@@ -162,7 +162,7 @@ public final class TCPSocket {
         let size = socklen_t(MemoryLayout<sockaddr_in6>.size)
         // connect to the host and port
         let connectResult = withUnsafePointer(to: &address) { pointer in
-            return pointer.withMemoryRebound(to: sockaddr.self, capacity: Int(size)) { pointer in
+            return pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
                 return SystemLibrary.connect(fileDescriptor, pointer, size)
             }
         }
@@ -177,7 +177,12 @@ public final class TCPSocket {
     @discardableResult
     func send(data: Data) throws -> Int {
         let bytesSent = data.withUnsafeBytes { pointer in
-            SystemLibrary.send(fileDescriptor, pointer, data.count, Int32(0))
+            SystemLibrary.send(
+                fileDescriptor,
+                pointer.bindMemory(to: Int8.self).baseAddress,
+                data.count,
+                Int32(0)
+            )
         }
         guard bytesSent >= 0 else {
             throw OSError.lastIOError()
@@ -191,7 +196,12 @@ public final class TCPSocket {
     func recv(size: Int) throws -> Data {
         var bytes = Data(count: size)
         let bytesRead = bytes.withUnsafeMutableBytes { pointer in
-            return SystemLibrary.recv(fileDescriptor, pointer, size, Int32(0))
+            return SystemLibrary.recv(
+                fileDescriptor,
+                pointer.bindMemory(to: Int8.self).baseAddress,
+                size,
+                Int32(0)
+            )
         }
         guard bytesRead >= 0 else {
             throw OSError.lastIOError()
@@ -201,8 +211,12 @@ public final class TCPSocket {
 
     /// Close the socket
     func close() {
-        _ = SystemLibrary.shutdown(fileDescriptor, Int32(SHUT_WR))
-        _ = SystemLibrary.close(fileDescriptor)
+        if SystemLibrary.shutdown(fileDescriptor, Int32(SHUT_WR)) != 0  {
+            print("SystemLibrary.shutdown with fileDescriptor \(fileDescriptor) failed: \(OSError.lastIOError()))")
+        }
+        if SystemLibrary.close(fileDescriptor) != 0 {
+            print("SystemLibrary.close with fileDescriptor \(fileDescriptor) failed: \(SystemLibrary.strerror(errno)))")
+        }
     }
 
     func getPeerName() throws -> (String, Int) {
@@ -221,7 +235,7 @@ public final class TCPSocket {
         return try withUnsafeMutablePointer(to: &address) { pointer in
             let result = pointer.withMemoryRebound(
                 to: sockaddr.self,
-                capacity: Int(size)
+                capacity: 1
             ) { addressptr in
                 return function(fileDescriptor, addressptr, &size)
             }
@@ -232,7 +246,7 @@ public final class TCPSocket {
             case AF_INET:
                 return try pointer.withMemoryRebound(
                     to: sockaddr_in.self,
-                    capacity: MemoryLayout<sockaddr_in>.size
+                    capacity: 1
                 ) { addressptr in
                     return (
                         try structToAddress(
@@ -246,7 +260,7 @@ public final class TCPSocket {
             case AF_INET6:
                 return try pointer.withMemoryRebound(
                     to: sockaddr_in6.self,
-                    capacity: MemoryLayout<sockaddr_in6>.size
+                    capacity: 1
                 ) { addressptr in
                     return (
                         try structToAddress(
@@ -281,11 +295,12 @@ public final class TCPSocket {
         var addrStruct = addrStruct
         // convert address struct into address string
         var address = Data(count: Int(addressLength))
+
         guard address.withUnsafeMutableBytes({ pointer in
             inet_ntop(
                 family,
                 &addrStruct,
-                pointer,
+                pointer.bindMemory(to: CChar.self).baseAddress,
                 socklen_t(addressLength)
             ) != nil
         }) else {
@@ -295,5 +310,14 @@ public final class TCPSocket {
             address = address.subdata(in: 0 ..< index)
         }
         return String(data: address, encoding: .utf8)!
+    }
+}
+
+import Darwin
+extension SystemLibrary {
+    static func strerror(_ errno: Int32) -> String {
+        let cmsg = Darwin.strerror(errno)!
+        let msg = String(validatingUTF8: cmsg) ?? "Unknown Error"
+        return "\(msg) (\(errno))"
     }
 }

@@ -68,7 +68,7 @@ func getUnusedTCPPort() throws -> Int {
     guard withUnsafePointer(to: &address, { pointer in
         return pointer.withMemoryRebound(
             to: sockaddr.self,
-            capacity: Int(addressSize)
+            capacity: 1
         ) { pointer in
             return bind(fileDescriptor, pointer, addressSize) >= 0
         }
@@ -81,7 +81,7 @@ func getUnusedTCPPort() throws -> Int {
     guard withUnsafeMutablePointer(to: &socketAddress, { pointer in
         return pointer.withMemoryRebound(
             to: sockaddr.self,
-            capacity: Int(socketAddressSize)
+            capacity: 1
         ) { pointer in
             return getsockname(fileDescriptor, pointer, &socketAddressSize) >= 0
         }
@@ -93,11 +93,11 @@ func getUnusedTCPPort() throws -> Int {
 
 func makeRandomString(_ length: Int) -> String {
     let letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    let endIndex = UInt32(letters.count - 1)
-    let result: [Any?] = Array(repeating: nil, count: length)
-    return String(result.map({ _ in
-        letters[String.Index(encodedOffset: Int(arc4random_uniform(endIndex)))]
-    }))
+    var string = ""
+    for _ in 1...length {
+        string.append(String(letters.randomElement()!))
+    }
+    return string
 }
 
 extension XCTestCase {
